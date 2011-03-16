@@ -1,0 +1,281 @@
+(
+
+w=Window.new.front; // Use Rect for precise placement in a CompositeView
+
+Slider(w, Rect (50,50,250,20)); // Slider is actually placed in w.view, which is a top view.
+
+Slider(w.view, Rect (50,100,250,20)) // So this is equivalent when Window is used as a parent
+
+)
+
+
+(
+
+w=Window.new.front;
+
+Routine{
+
+20.do{
+
+w.bounds=Rect(200.rand, 200+200.rand, 300,300);
+
+0.1.wait;
+
+};
+
+w.close;
+
+}.play(AppClock)
+
+)
+(
+
+w=Window.new.front;
+
+Routine{
+
+20.do{
+
+{w.bounds=Rect(200.rand, 200+200.rand, 300,300) }.defer; // you must defer this
+
+0.5.wait;
+
+};
+
+{w.close}.defer; // you must defer this
+
+}.play(SystemClock)
+
+)
+
+(
+
+s.waitForBoot({
+
+n={arg freq=220;
+
+var out;
+
+out=SinOsc.ar(freq,0,0.2);
+
+8.do{out = AllpassN.ar(out, 0.2,0.02+0.20.rand,8)};
+
+out;
+
+}.play;
+
+w = Window("Use arrow keys to change the frequency by steps", Rect(100, 500, 500, 120));
+
+b = NumberBox(w, Rect(200, 10, 100, 20));
+
+b.value = 220;
+
+b.action = {arg numb; n.set(\freq, numb.value); }; // set the action here to change the frequency.
+
+b.addAction ( {w.view.background = Color.rand}); // add another action here.
+
+
+b.step=55; //make the step a fraction of the freq
+
+b.focus;
+
+w.front;
+
+CmdPeriod.doOnce({w.close});
+
+});
+
+)
+(
+
+var value = 0.5;
+
+w = Window.new.front;
+
+// (1) create a user view
+
+v = UserView(w,Rect(50,50,200,20));
+
+// (2) define a drawing function for Pen
+
+v.drawFunc = {
+
+// Draw the fill
+
+Pen.fillColor = Color.grey;
+
+Pen.addRect(Rect(0,0, v.bounds.width*value,v.bounds.height));
+
+Pen.fill;
+
+// Draw the triangle
+
+Pen.fillColor = Color.red;
+
+Pen.moveTo(((v.bounds.width*value)-5) @ v.bounds.height);
+
+Pen.lineTo(((v.bounds.width*value)+5) @ v.bounds.height);
+
+Pen.lineTo(((v.bounds.width*value)) @ (v.bounds.height/2));
+
+Pen.lineTo(((v.bounds.width*value)-5) @ v.bounds.height);
+
+Pen.fill;
+
+// Draw the frame
+
+Pen.strokeColor = Color.black;
+
+Pen.addRect(Rect(0,0, v.bounds.width,v.bounds.height));
+
+Pen.stroke;
+
+};
+
+// (3) set an action to the user view
+
+v.action = {value.postln; v.refresh};
+
+// (4) define mouse actions
+
+v.mouseDownAction = {arg view, x = 0.5,y, m;
+
+//m.postln;
+
+([256, 0].includes(m)).if{ // restrict to no modifier
+
+value = (x).linlin(0,v.bounds.width,0,1); v.doAction};
+
+};
+
+v.mouseMoveAction = v.mouseDownAction;
+
+// (5) (optional) define key actions
+
+v.keyDownAction = { arg view, char, modifiers, unicode,keycode;
+
+if (unicode == 16rF700, { value = (value+0.1).clip(0,1) });
+
+if (unicode == 16rF703, { value = (value+0.1).clip(0,1) });
+
+if (unicode == 16rF701, { value = (value-0.1).clip(0,1) });
+
+if (unicode == 16rF702, { value = (value-0.1).clip(0,1) });
+
+v.doAction;
+
+};
+
+// (6) (optional) define drag and drop
+
+v.beginDragAction = {value}; // what to drag
+
+v.canReceiveDragHandler = {View.currentDrag.isNumber}; // what to receive
+
+v.receiveDragHandler = {value = View.currentDrag; v.doAction }; // what to do on receiving
+
+// just for testing drag and drop
+
+Slider(w,Rect(50,100,200,20));
+
+StaticText(w,Rect(50,150,350,50)).string_("To Test Drag and Drop,\nHold down Cmd (Ctl) Key");
+
+)/home/ggz/
+(
+
+s.waitForBoot({
+
+SynthDef("test", { arg out, freq=330, amp=0.6;
+
+Out.ar(out, SinOsc.ar(freq,0,amp))
+
+}).add;
+
+SynthDescLib.global.at(\test).makeWindow;
+
+});
+
+)
+
+
+
+(
+
+ w=Window.new.front;
+
+ v=CompositeView.new(w,w.view.bounds.insetBy(10)).background_(Color.rand);
+
+ v.decorator=FlowLayout(v.bounds);
+
+ t=Array.fill(9,{arg i; var n,r,q;
+
+	 n=CompositeView.new(v,Rect(20,20,121,121)).background_(Color.rand);
+
+	 q=StaticText(n, n.bounds.moveTo(0,0).insetBy(25)).string_((70+i).asAscii).align_(\center);
+
+	 q.enabled=true;
+
+	 q.font=Font.default.copy;
+
+	 q.background_(Color.rand);
+
+	 n.globalKeyDownAction={
+
+		 n.background_(Color.rand);
+
+		 q.font=q.font.size_(5+q.font.size+7%60)
+
+	 };
+
+	 });
+
+)
+(
+var win, winsize, globalKeyDownAction, butA, butB;
+
+globalKeyDownAction =  {arg view, key, mod, u;
+	"global key: ".post;key.postln;
+	};
+	winsize = Rect(100, 200, 300, 400);
+	win = Window("global Key Down Example", winsize);
+
+	win.view.keyDownAction_( {arg view, key, mod, u; globalKeyDownAction.value( view, key, mod, u);});
+
+	win.view.decorator = FlowLayout(win.view.bounds);
+
+	butA = Slider(win, Rect(0, 0, 30, 40));
+	butA.keyDownAction_( {arg view, key, mod, u;
+		"local: ".post;key.postln;
+			});
+			win.view.decorator.nextLine;
+			butB = Slider(win, Rect(0, 0, 100, 40));
+			butB.keyDownAction_( {arg view, key, mod, u;
+				"local: ".post;key.postln;
+					globalKeyDownAction.value( view, key, mod, u);
+						});
+					win.front;
+)
+
+
+(
+var win, winsize, globalKeyDownAction, butA, butB;
+	winsize = Rect(100, 200, 300, 400);
+	win = Window("global Key Down Example", winsize);
+
+	win.view.keyDownAction_( {arg view, key, mod, u; globalKeyDownAction.value( view, key, mod, u);});
+
+	win.view.decorator = FlowLayout(win.view.bounds);
+
+	butA = Button(win, Rect(0, 0, 30, 40));
+	butA.keyDownAction_( {arg view, key, mod, u, k;
+		~bla = (
+			112: {"plop".postln}
+			113: {"plop".postln}
+		);
+		~bla[k].value
+		});
+					win.front;
+)
+"a".asInteger
+"4".asInteger.postln;
+format("this % a %. pi = %, list = %\n", "is", "test", pi.round(1e-4), (1..4))
