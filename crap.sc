@@ -1,5 +1,4 @@
 
-
 (
 // using built-in SC stuff
 var spec, synth, win, gui;
@@ -67,3 +66,4 @@ x = Synth(\bubblebub);
 x.set(\t_trig, 1); // run this line multiple times, to get multiple (very similar) bubbles!
 x.free;
 
+// git test
