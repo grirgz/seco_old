@@ -1,4 +1,5 @@
-s.boot
+s.boot;
+s
 (
 SynthDef("channel", {
 	arg out, in, amp, bal;
@@ -1101,7 +1102,7 @@ Pdef(\p_snare, Pbind(
 
 (
 ~pdynseq = { arg data, score, key, repeat = 1;
-	Proutine({
+	Prout({
 		var idx;
 		repeat.do {
 			idx = 0;
@@ -1114,14 +1115,82 @@ Pdef(\p_snare, Pbind(
 };
 
 ~pdynscalar = { arg data, score, key, repeat = inf;
-	Proutine({
+	Prout({
 		repeat.do {
 			data[score][key].yield;
 		};
 	});
 };
 
+~pedynscalar = { arg data, key, repeat = inf;
+	Prout({
+		repeat.do {
+			currentEnvironment[data][key].yield;
+		};
+	});
+};
 
+~make_player = { arg patfun;
+	var get, data, nodeproxy;
+	data = {
+		var dict = Dictionary.new;
+		patfun.argNames.do({ arg argName, idx;
+			dict[argName] = patfun.defaultArgs[idx];
+		});
+		dict;
+	};
+	get = { arg argName; data[argName] };
+
+	nodeproxy = NodeProxy.audio(s, 2);
+	nodeproxy.source = patfun.valueArray( patfun.argNames.collect({ arg argName;
+		switch(argName, 
+			\stepline, { 
+				var repeat = inf;
+				Prout({
+					var idx;
+					repeat.do {
+						idx = 0;
+						while( { get.(argName)[idx].notNil } , { 
+							get.(argName)[idx].yield;
+							idx = idx + 1;
+						});
+					}
+				})
+			},
+			\type, {
+				Pif( Pkey(\stepline) > 0 , \note, \rest) // WTF with == ?????
+			},
+			//default:
+			{
+				Prout({
+					var repeat = inf;
+					repeat.do {
+						get.(argName);
+					}
+				})
+			}
+		);
+	}));
+
+			
+
+	(
+		patfun: patfun,
+		node: nodeproxy,
+		data: data,
+		get: get,
+		set: { arg self, argName, val;
+			data[argName] = val;
+		},
+		getargs: { arg self; patfun.argNames }
+	)
+};
+
+~clone_player = { arg player;
+	var newplayer;
+	newplayer = ~make_player.(player.patfun);	
+	newplayer.data = player.data;
+};
 
 ~mk_sequencer = {(
 	model: (
@@ -1136,7 +1205,7 @@ Pdef(\p_snare, Pbind(
 				[ 0, 0, 0, 0],
 				[ 0, 0, 0, 0]
 			]
-		],
+		]
 			
 
 	),
@@ -1155,9 +1224,9 @@ Pdef(\p_snare, Pbind(
 		),
 		clipboard: (
 			node: \p_snare1,
-			kind: // TODO:
+			kind: \group // TODO:
 		)
-	)
+	),
 
 
 	make_kb_handlers: { arg self;
@@ -1175,73 +1244,21 @@ Pdef(\p_snare, Pbind(
 
 	make_newlivenodename_from_livenodename: { arg self, name;
 		// TODO: make it real
-		name ++ "2";
-	},
-
-	make_livenodepat_from_libnode_and_livepool: { arg libnodename, livenodename;
-		var lib // TODO : finir la fonction
-		Pdef(livenodename, 
-			Pchain(
-				Pbind(
-					\stepline, ~pdynseq.(self.model.livenodepool, livenodename, \stepline),
-					\type, Pif( Pkey(\stepline) > 0 , \note, \rest) // WTF with == ?????
-				), 
-				Pbind(*livenodedict.array), // TODO: verify .array is correct
-				Pdef(libnodename)
-			)
-		);
-		livenodename;
-
+		name ++ ".2";
 	},
 
 	make_livenode_from_libnode: { arg self, libnodename;
 		var livenodename, livenodedict;
 		livenodename = self.make_livenodename_from_libnodename(libnodename);
-		livenodedict = Dictionary.new;
-		self.model.livenodepool[livenodename] = Dictionary.new;
-		self.model.livenodepool[livenodename][\stepline] = [0,0,0,0, 0,0,0,0]; // TODO: make it dynamic
-		Pdef(libnodename).list.pairsDo { arg key, val;
-			if({ val.isNumber }, { 
-				self.model.livenodepool[livenodename][key] = val;
-				livenodedict[key] = ~pdynscalar.(self.model.livenodepool, livenodename, key);
-			});
-
-		};
-		Pdef(livenodename, 
-			Pchain(
-				Pbind(
-					\stepline, ~pdynseq.(self.model.livenodepool, livenodename, \stepline),
-					\type, Pif( Pkey(\stepline) > 0 , \note, \rest) // WTF with == ?????
-				), 
-				Pbind(*livenodedict.array), // TODO: verify .array is correct
-				Pdef(libnodename)
-			)
-		);
+		self.model.livenodepool[livenodename] = ~make_player.(self.model.patlib[libnodename]);
 		livenodename;
 	},
 
 	duplicate_livenode: { arg self, livenodename;
 		var newlivenodename, newlivenode, newlivenode_pdict;
-		newlivenode = Dictionary.new;
 		newlivenodename = self.make_newlivenodename_from_livenodename(livenodename);
-		self.model.livenodepool[livenodename].pairsDo { arg key, val;
-			newlivenode[key] = val;	
-		};
-		Pdef(livenodename).list.pairsDo { arg key, val;
-			switch(key, 
-				\stepline, { 
-					newlivenode_pdict[key] = ~pdynseq.(self.model.livenodepool, newlivenodename, \stepline),
-				},
-				\type, {
-					newlivenode_pdict[key] = val;
-				},
-				{
-					newlivenode_pdict[key] = ~pdynscalar.(self.model.livenodepool, newlivenodename, key);
-				}
-			);
-		};
-					
-
+		self.model.livenodepool[newlivenodename] = ~clone_player.(self.model.livenodepool[livenodename]);
+		newlivenodename;
 	},
 
 	handlers: { arg self, input;
@@ -1254,11 +1271,11 @@ Pdef(\p_snare, Pbind(
 			},
 			\copy, {
 				var sel = self.state.selected;
-				self.state.clipboard.node = self.model[sel.panel][sel.bank][sel.coor.y][sel.coor.x]
+				self.state.clipboard.node = self.model[sel.panel][sel.bank][sel.coor.y][sel.coor.x];
 			},
 			\cut, {
 				var sel = self.state.selected;
-				self.state.clipboard.node = self.model[sel.panel][sel.bank][sel.coor.y][sel.coor.x]
+				self.state.clipboard.node = self.model[sel.panel][sel.bank][sel.coor.y][sel.coor.x];
 				// TODO: forbid cut in patlib
 				self.model[sel.panel][sel.bank][sel.coor.y][sel.coor.x] = 0;
 				// TODO: refresh gui
@@ -1287,7 +1304,7 @@ Pdef(\p_snare, Pbind(
 							\nodegroup, {
 								// link nodegroup as livenode
 
-							},
+							}
 						);
 					},
 					\nodegroup, {
@@ -1301,11 +1318,10 @@ Pdef(\p_snare, Pbind(
 							\nodegroup, {
 								// copy clipboard nodegroup and overwrite selected nodegroup
 								// TODO: implement trashcan
-							},
+							}
 						);
 					}
 				);
-				self.model[sel.panel][sel.bank][sel.coor.y][sel.coor.x] = self.state.clipboard.node
 			},
 			\append, {
 				//TODO
@@ -1321,7 +1337,7 @@ Pdef(\p_snare, Pbind(
 			},
 			\play_selected, {
 				
-			},
+			}
 		)
 	}
 
@@ -1329,3 +1345,121 @@ Pdef(\p_snare, Pbind(
 )};
 
 )
+
+
+"pal"++4
+~fun.(2)
+
+(
+~fun = { arg in=0; { ~rah.debug("rah"++in); ~bla[0].debug("bla"++in); ~nia[0][0].debug("nia"++in);  ~rah }};
+~env = ( rah: 4, bla: [7], nia: [[8]] );
+~a = Penvir(~env, Pbind(
+	\bla, Pfunc(~fun.(1))
+));
+
+)
+(
+~env2 = ~env.deepCopy;
+~a2 = Penvir(~env2, Pbind(
+	\bla, Pfunc(~fun.(2))
+));
+
+)
+~env[\bla][0] = 10;
+~env[\nia][0][0] = 12;
+~env[\rah] = 5;
+~env2[\rah] = 6;
+~p = ~a.play
+~p2 = ~a2.play
+~p.trace.value
+
+
+~rah = nil
+(
+~env = ( param: (rah: Pfunc({"haha".postln; 4})) );
+~a = Pbind(
+	\freq, ~pedynscalar.(\param, \rah)
+));
+
+)
+(
+~b = Penvir(~env, 
+
+)
+
+)
+
+(
+~a = { arg bla, nia=4;
+	Pbind(
+		\freq, nia
+	);
+};
+
+)
+
+(
+
+(
+	a: 5,
+	b: { arg self; self.a+2}
+)
+
+)
+
+
+~a.argNames
+~a.defaultArgs
+~a.varArgs
+
+
+Proto
+Quarks.gui
+
+
+
+
+
+
+(
+~bla = NodeProxy.audio(s, 2);
+~bla.source = Pbind(
+	\freq, 300
+);
+~bla.play
+
+~bla.nodeMap
+~bla.getFamily
+~bla.getStructure
+~bla.controlNames
+~bla.set(\freqi, 400)
+~bla.key
+)
+
+
+(
+
+Ndef(\lfo, { |lofreq| SinOsc.kr(lofreq) });
+
+Ndef(\a, { |freq=300, dens=20, amp=0.1, pan| 
+
+Pan2.ar(Ringz.ar(Dust.ar(dens, amp / (dens.max(1).sqrt)), freq, 0.2), pan) 
+
+});
+
+)
+
+
+// make an NdefGui. By default, this has a lot of the options on.
+
+n = NdefGui.new;
+
+n.object_(Ndef(\lfo));
+
+n.object_(Ndef(\a));
+
+
+Ndef(\a).set(\lofreq, 12);
+
+
+
