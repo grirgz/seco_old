@@ -144,66 +144,81 @@ make_cell_button = { arg parent, label, action;
 	});
 };
 
-~make_player = { arg patfun;
-	var get, data, nodeproxy;
-	data = {
-		var dict = Dictionary.new;
-		patfun.argNames.do({ arg argName, idx;
-			dict[argName] = patfun.defaultArgs[idx];
-		});
-		dict;
-	}.value;
-	get = { arg argName; data[argName] };
+~make_player = { arg patfun, data=nil;
+	var player;
+	player = (
+		init: { arg self;
 
-	nodeproxy = NodeProxy.audio(s, 2);
-	nodeproxy.source = patfun.valueArray( patfun.argNames.collect({ arg argName;
-		switch(argName, 
-			\stepline, { 
-				var repeat = 100;
-				Prout({
-					var idx;
-					repeat.do {
-						idx = 0;
-						while( { get.(argName)[idx].notNil } , { 
-							get.(argName)[idx].yield;
-							idx = idx + 1;
-						});
+			self.data = {
+				var dict;
+				patfun.argNames.debug("patfun argNames");
+				patfun.def.sourceCode.debug("source");
+				if( data.isNil, {
+					dict = Dictionary.new;
+					patfun.argNames.do({ arg argName, idx;
+						dict[argName] = patfun.defaultArgs[idx];
+					});
+				}, {
+					dict = Dictionary.new;
+					patfun.argNames.do({ arg argName, idx;
+						dict[argName] = data[argName];
+					});
+				});
+				dict.debug("bordel dict");
+				dict;
+			}.value;
+
+			self.node.source = patfun.valueArray( patfun.argNames.collect({ arg argName;
+				switch(argName, 
+					\stepline, { 
+						var repeat = 100;
+						Prout({
+							var idx;
+							repeat.do {
+								idx = 0;
+								while( { self.get(argName)[idx].notNil } , { 
+									self.get(argName)[idx].debug("yield");
+									self.get(argName)[idx].yield;
+									idx = idx + 1;
+								});
+							}
+						})
+					},
+					\type, {
+						Pif( Pkey(\stepline) > 0 , \note, \rest) // WTF with == ?????
+					},
+					//default:
+					{
+						Prout({
+							var repeat = 100;
+							repeat.do {
+								self.get(argName).yield;
+							}
+						})
 					}
-				})
-			},
-			\type, {
-				Pif( Pkey(\stepline) > 0 , \note, \rest) // WTF with == ?????
-			},
-			//default:
-			{
-				Prout({
-					var repeat = 100;
-					repeat.do {
-						get.(argName).yield;
-					}
-				})
-			}
-		);
-	}));
-
-			
-
-	(
-		patfun: patfun,
-		node: nodeproxy,
-		data: data,
-		get: get,
-		set: { arg self, argName, val;
-			data[argName] = val;
+				);
+			}));
 		},
-		getargs: { arg self; patfun.argNames }
-	)
+		patfun: { arg self; patfun; },
+		node: NodeProxy.audio(s, 2),
+		data: data,
+		get: { arg self, argName; self.data[argName] },
+		set: { arg self, argName, val;
+			self.data[argName] = val;
+		},
+		getargs: { arg self; self.patfun.argNames }
+	);
+	player.init;
+	player;
 };
+
 
 ~clone_player = { arg player;
 	var newplayer;
-	newplayer = ~make_player.(player.patfun);	
-	newplayer.data = player.data;
+	player.debug("clone player");
+	newplayer = ~make_player.(player.patfun, player.data);	
+	//newplayer.data.putAll(player.data);
+	newplayer;
 };
 
 ~mk_sequencer = {(
@@ -255,10 +270,12 @@ make_cell_button = { arg parent, label, action;
 			if( self.parlive.includesKey( path ), {
 				self.parlive[ path ][\data][address.coor.y] = value;
 			}, {
+				var data = [0,0,0,0, 0,0,0,0];
+				data[address.coor.y] = value;
 				self.parlive[ path ] = (
 					name: (\group ++ address.coor.x),
-					data: [0,0,0,0, 0,0,0,0]
-				)
+					data: data
+				);
 			})
 		},
 
@@ -332,6 +349,9 @@ make_cell_button = { arg parent, label, action;
 	duplicate_livenode: { arg self, livenodename;
 		var newlivenodename, newlivenode, newlivenode_pdict;
 		newlivenodename = self.make_newlivenodename_from_livenodename(livenodename);
+		newlivenodename.debug("newlivenodename");
+		livenodename.debug("livenodename");
+		self.model.livenodepool.debug("livenodepool");
 		self.model.livenodepool[newlivenodename] = ~clone_player.(self.model.livenodepool[livenodename]);
 		newlivenodename;
 	},
@@ -340,15 +360,21 @@ make_cell_button = { arg parent, label, action;
 	//////////////////// HANDLERS
 	///////////////////////////////////////////////////////////////////////////////////////
 
+	shift_address: { arg self, ad;
+		var address = ad.deepCopy;
+		address.coor.y = address.coor.y-1;
+		address;
+	},
+
 	copy_selection: { arg self;
 		var sel = self.state.selected;
 		switch( sel.panel,
 			\parlive, {
-				self.state.clipboard.node = self.model.get_parlive(sel);
+				self.state.clipboard.node = self.model.get_parlive(self.shift_address(sel));
 				self.state.clipboard.kind = sel.kind;
 			},
 			\patlib, {
-				self.state.clipboard.node = self.model.patlib[sel.bank][sel.coor.y][sel.coor.x];
+				self.state.clipboard.node = self.model.patlib[sel.bank][sel.coor.x][sel.coor.y];
 				self.state.clipboard.kind = sel.kind;
 			}
 		);
@@ -435,6 +461,18 @@ make_cell_button = { arg parent, label, action;
 							\node, {
 								// copy clipboard livenode and overwrite selected livenode
 								// TODO: implement trashcan
+
+								var name;
+								var sel = self.state.selected;
+								var address = self.state.selected.deepCopy;
+								address.coor.y = address.coor.y-1;
+								name = self.duplicate_livenode(self.state.clipboard.node);
+								name.debug("new node name");
+
+								self.model.set_parlive(address, name);
+								self.refresh_button_at(sel, name);
+								self.sync_button_state(sel);
+								self.model.debug("MODEL");
 							},
 							\nodegroup, {
 								// link nodegroup as livenode
@@ -484,10 +522,24 @@ make_cell_button = { arg parent, label, action;
 			},
 
 			\play_selected, {
-				self.get_selected_player.node.play;
+				var player = self.get_selected_player;
+				if( player.isNil, { 
+					"Dont play void player".debug("NONO");
+				}, {
+					
+					player.node.dump;	
+					player.node.source.dump;	
+					player.node.play;	
+
+				});
 			},
 			\stop_selected, {
-				self.get_selected_player.node.stop;
+				var player = self.get_selected_player;
+				if( player.isNil, { 
+					"Dont stop void player".debug("NONO");
+				}, {
+					player.node.stop;
+				});
 			}
 		)
 	},
@@ -580,8 +632,7 @@ make_cell_button = { arg parent, label, action;
 		sel.debug("get_selected_name sel");
 		switch( sel.panel,
 			\parlive, {
-				"pourquoi".debug("bah oui");
-				self.get_parlive.debug("c'est quoi");
+				address.debug("address");
 				ret = self.model.get_parlive(address);
 				ret.debug("arf ret");
 				"hein".debug("bah oui");
@@ -779,6 +830,7 @@ make_cell_button = { arg parent, label, action;
 \bla -> { arg type, stepline = #[1,1,0,1], freq = 300;
 
 	Pbind(
+		\instrument, \bubblebub,
 		\freq, freq,
 		\stepline, stepline,
 		\type, type
@@ -789,6 +841,8 @@ make_cell_button = { arg parent, label, action;
 \rah -> { arg type, stepline = #[1,1,0,1], freq = 300;
 
 	Pbind(
+		\instrument, \bubblebub,
+		\pitchcurvelen, 0.5,
 		\freq, freq,
 		\stepline, stepline,
 		\type, type
@@ -922,3 +976,58 @@ UniqueID.next;
 )
 "foobar".findRegexp("o*bar");
 
+{ arg bla; bla+1; }.def.dump
+
+
+
+
+
+
+
+
+
+
+b = NodeProxy.audio(s, 2);
+
+b.source = { PinkNoise.ar(0.2.dup) };
+b.play
+
+a = PatternProxy.new;
+
+a.play; // play to hardware output, return a group with synths
+
+
+// setting the source
+
+a.source = { SinOsc.ar([350, 351.3], 0, 0.2) };
+
+
+// the proxy has two channels now:
+
+a.numChannels.postln;
+
+a.source = { SinOsc.ar([390, 286] * 1.2, 0, 0.2) };
+
+
+(
+a.source = 
+	Pbind(
+		\freq, Prout({
+			100.do {
+				"plop".postln;
+				300.yield;
+			}
+		})
+		//\type, \note
+	);
+)
+(
+a.source = 
+	Pbind(
+		\freq, Pfunc({
+				"plop".postln;
+				300;
+		})
+		//\type, \note
+	);
+)
