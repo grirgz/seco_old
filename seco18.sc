@@ -92,7 +92,7 @@ var make_widget_list_view, make_header_button, make_cell_button;
 	down: 63233
 );
 ~cakewalk = (
-	\knot: [
+	\knob: [
 		74, 71, 65, 2, 5, 76, 77, 78, 10
 	],
 	\button: [
@@ -200,7 +200,7 @@ make_cell_button = { arg parent, label, action;
 			}));
 		},
 		patfun: { arg self; patfun; },
-		node: NodeProxy.audio(s, 2),
+		node: PatternProxy.new,
 		data: data,
 		get: { arg self, argName; self.data[argName] },
 		set: { arg self, argName, val;
@@ -300,6 +300,9 @@ make_cell_button = { arg parent, label, action;
 		),
 		panel: (
 			patlib: (
+				bank: 0
+			),
+			editplayer: (
 				bank: 0
 			),
 			parlive: (
@@ -558,6 +561,7 @@ make_cell_button = { arg parent, label, action;
 
 		self.kb_handler[ [~modifiers.fx, ~kbfx[8]] ] = { self.handlers( [\change_panel, \patlib] ) };
 		self.kb_handler[ [~modifiers.fx, ~kbfx[9]] ] = { self.handlers( [\change_panel, \parlive] ) };
+		self.kb_handler[ [~modifiers.fx, ~kbfx[10]] ] = { self.handlers( [\change_panel, \editplayer] ) };
 
 		~kbpad8x4.do { arg line, iy;
 			line.do { arg key, ix;
@@ -775,6 +779,216 @@ make_cell_button = { arg parent, label, action;
 
 	},
 
+	make_editplayer_view: { arg self; 
+	
+		var ps_row_layout;
+		var main_layout;
+		var make_midi_cc_widget;
+		var make_stepline_widget;
+		var make_player_model;
+		var params = List[];
+		var parent = self.window;
+
+		var player = self.get_selected_player;
+
+		params = player.getargs;
+		params.debug("params");
+
+		make_midi_cc_widget = { arg parent, paramid, ccid=nil;
+			var row_layout, ccname, param_val, cc_val, slider;
+			var model;
+			row_layout = GUI.hLayoutView.new(parent, Rect(0,0,(self.width+10),30));
+			row_layout.background = Color.rand;
+			
+			ccname = GUI.staticText.new(row_layout, Rect(0,0,60,30));
+			ccname.string = "knob1";
+
+			param_val = GUI.staticText.new(row_layout, Rect(0,0,60,30));
+			param_val.string = "200";
+
+			cc_val = GUI.staticText.new(row_layout, Rect(0,0,60,30));
+			cc_val.string = "231";
+
+			slider = GUI.slider.new(row_layout, Rect(0,0,60*6,30));
+			slider.value = param_val.string.asFloat / 500; // TODO: use Specs
+
+			model = (
+				blocked: \not,
+				ccid: nil,
+				set_value: { arg self, cc_value;
+					var param_value;
+					if(ccid.notNil, {
+						cc_val.value = cc_value;
+						self.unblock_do({
+							param_value = player.get(paramid);
+							param_val.string = param_value;
+							slider.value = param_value;
+						});
+					}, {
+						param_val.string = cc_value;
+						slider.string = cc_value;
+					});
+				},
+
+				unblock_do: { arg self, fun;
+					var cc_value = self.state.get_cc(ccid), param_value = player.get(paramid) ;
+
+					switch(self.blocked,
+						\not, fun,
+						\sup, {
+							if({ cc_value <= param_value }, {
+								self.blocked = \not;
+								fun.value;
+							});
+						},
+						\inf, {
+							if({ cc_value >= param_value }, {
+								self.blocked = \not;
+								fun.value;
+							});
+						}
+					);
+
+				},
+				
+				block: { arg self;
+					var cc_value = self.state.get_cc(self.ccid), param_value = player.get(paramid) ;
+					case 
+						{ cc_value > param_value } {
+							self.blocked = \sup;
+						}
+						{ cc_value < param_value } {
+							self.blocked = \inf;
+						}
+						{ true } {
+							self.blocked = \not;
+						}
+				},
+
+				assign_cc: { arg self, ccid;
+					self.ccid = ccid;
+
+					//self.ccresp = CCResponder({ |src,chan,num,value|
+							//[src,chan,num,value].debug("==============CCResponder");
+					//		self.set_value(value);
+					//	},
+					//	ccid.source, // any source
+					//	ccid.channel, // any channel
+					//	ccid.number, // any CC number
+					//	ccid.val // any value
+					//);
+				}
+
+			);
+			model.assign_cc(ccid);
+			model;
+		};
+
+		make_stepline_widget = { arg parent, name;
+			var row_layout, model, change_line;
+			row_layout = GUI.hLayoutView.new(parent, Rect(0,0,(self.width+10),60));
+			row_layout.background = Color.rand;
+
+			name.debug("name");
+			player.get(name).debug("get param");
+
+			change_line = { arg fun;
+				var line;
+				line = player.get(name);
+				player.set_param(name, fun.(line));
+			};
+			model = (
+				bar_length: 16,
+				viewport: 0 @ 16,
+				draw_buttons: { arg self;
+					player.get(name)[self.viewport.x .. self.viewport.y].do { arg step, stepidx;
+						make_cell_button.(row_layout, stepidx);
+					};
+				},
+				get_button: { arg self, idx;
+					row_layout.children[idx];
+				},
+				toggle: { arg self, idx;
+					change_line.(_[idx] = ~toggle_value.(_[idx]));
+					~toggle_button.(self.get_button(idx));
+				},
+				add_bar: { arg self, default=0;
+					change_line.(_ ++ ( default ! self.bar_length ));
+					self.draw_buttons;
+				},
+				del_bar: { arg self, default=0;
+					change_line.( _[ .. (0 - self.bar_length) ] );
+					self.draw_buttons;
+				},
+
+				make_shortcuts: { arg self;
+					var dict = Dictionary.new;
+					dict[ [0, ~numpad[\plus]] ] = { self.add_bar };
+					dict[ [0, ~numpad[\minus]] ] = { self.del_bar };
+					~kb8x2line.do { arg kc, idx;
+						dict[ [0, kc ] ] = { self.toggle(idx) };
+					};
+					dict;
+				}
+
+			);
+
+			model.draw_buttons;
+			model;
+		};
+		main_layout = GUI.vLayoutView.new(parent, Rect(0,0,(self.width+10),60*6));
+		main_layout.background = Color.rand;
+
+		// player line + effects(TODO) + amp
+
+		ps_row_layout = GUI.hLayoutView.new(main_layout, Rect(0,0,(self.width+10),60));
+		ps_row_layout.background = Color.rand;
+
+		make_cell_button.(ps_row_layout, \amp, {  });
+
+		make_midi_cc_widget.(ps_row_layout, \amp, (
+			source: nil,
+			channel: nil,
+			number: ~cakewalk[\slider][0],
+			val: nil
+		));
+
+		// stepline
+
+		ps_row_layout = GUI.hLayoutView.new(main_layout, Rect(0,0,(self.width+10),60));
+		ps_row_layout.background = Color.rand;
+
+		make_cell_button.(ps_row_layout, \stepline, {  });
+
+		make_stepline_widget.(ps_row_layout, \stepline);
+
+		// others param
+		params.reject([\stepline,\amp,\type].includes(_)).do { arg param, knobidx;
+			var ccid = nil;
+
+			param.debug("parammmmm2");
+			ps_row_layout = GUI.hLayoutView.new(main_layout, Rect(0,0,(self.width+10),30));
+			ps_row_layout.background = Color.rand;
+
+			param.debug("parammmmm3");
+			make_cell_button.(ps_row_layout, param, {  });
+
+			param.debug("parammmmm4");
+			if(~cakewalk[\knob][knobidx].notNil, {
+				ccid = (
+					source: nil,
+					channel: nil,
+					number: ~cakewalk[\knob][knobidx],
+					val: nil
+				);
+			});
+			param.debug("parammmmm");
+			make_midi_cc_widget.(ps_row_layout, param, ccid);
+		};
+
+
+	},
+
 	clear_current_panel: { arg self;
 		self.window.view.removeAll.value;
 		self.window.view.decorator = FlowLayout(self.window.view.bounds); // notice that FlowView refers to w.view, not w
@@ -784,7 +998,8 @@ make_cell_button = { arg parent, label, action;
 	refresh_current_panel: { arg self;
 		switch(self.state.current.panel,
 			\parlive, { self.show_parlive_panel },
-			\patlib, { self.show_patlib_panel }
+			\patlib, { self.show_patlib_panel },
+			\editplayer, { self.show_editplayer_panel }
 		);
 
 	},
@@ -800,6 +1015,13 @@ make_cell_button = { arg parent, label, action;
 		self.clear_current_panel.value;
 		self.state.current.panel = \patlib;
 		self.make_patlib_view;
+		self.window.view.focus(true);
+	},
+
+	show_editplayer_panel: { arg self;
+		self.clear_current_panel.value;
+		self.state.current.panel = \editplayer;
+		self.make_editplayer_view;
 		self.window.view.focus(true);
 	},
 
@@ -1031,3 +1253,5 @@ a.source =
 		//\type, \note
 	);
 )
+["stepline", "amp", "type", "freq", "bla"].reject({ arg it; ["stepline","amp","type"].includes(it)})
+List[\stepline,\amp,\type].includes(\amp)
