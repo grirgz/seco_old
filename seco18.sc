@@ -67,12 +67,19 @@ var make_widget_list_view, make_header_button, make_cell_button;
 	[113, 115, 100, 102, 103, 104, 106, 107 ],
 	[119, 120, 99, 118, 98, 110, 44, 59 ]
 ];
+~kb8x2line = [
+	38, 97, 233, 122, 34, 101, 39, 114, 40, 166, 45, 121, 232, 117, 95, 105
+];
 ~kbnumline = [
 	38, 233, 34, 39, 40, 45, 232, 95, 231, 224, 41, 61
 ];
 ~kbnumpad = [
 	48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
 ];
+~numpad = (
+	plus: 43,
+	minus: 45
+);
 ~modifiers = (
 	fx: 8388608,
 	ctrl: 262144,
@@ -176,9 +183,9 @@ make_cell_button = { arg parent, label, action;
 							var idx;
 							repeat.do {
 								idx = 0;
-								while( { self.get(argName)[idx].notNil } , { 
-									self.get(argName)[idx].debug("yield");
-									self.get(argName)[idx].yield;
+								while( { self.get_arg(argName)[idx].notNil } , { 
+									self.get_arg(argName)[idx].debug("yield");
+									self.get_arg(argName)[idx].yield;
 									idx = idx + 1;
 								});
 							}
@@ -189,10 +196,11 @@ make_cell_button = { arg parent, label, action;
 					},
 					//default:
 					{
+						//self.data[argName] = PatternProxy.new;
 						Prout({
 							var repeat = 100;
 							repeat.do {
-								self.get(argName).yield;
+								self.get_arg(argName).yield;
 							}
 						})
 					}
@@ -200,11 +208,28 @@ make_cell_button = { arg parent, label, action;
 			}));
 		},
 		patfun: { arg self; patfun; },
-		node: PatternProxy.new,
+		node: EventPatternProxy.new,
 		data: data,
-		get: { arg self, argName; self.data[argName] },
-		set: { arg self, argName, val;
-			self.data[argName] = val;
+		get_arg: { arg self, argName; 
+			if(self.getargs.includes(argName), {
+				if([\type, \stepline].includes(argName), {
+					self.data[argName];
+				}, {
+					//self.data[argName].source;
+					self.data[argName];
+				})
+			}, {
+				("ERROR: player: no such arg: " ++ argName).postln;
+				nil;
+			});
+		},
+		set_arg: { arg self, argName, val;
+			if([\type, \stepline].includes(argName), {
+				self.data[argName] = val;
+			}, {
+				//self.data[argName].source = val;
+				self.data[argName] = val;
+			})
 		},
 		getargs: { arg self; self.patfun.argNames }
 	);
@@ -287,6 +312,16 @@ make_cell_button = { arg parent, label, action;
 	),
 	state: (
 		// TODO: implement offset
+		get_cc: { arg self, ccid;
+			// TODO: use whole ccid
+			var ret = self.cc[ccid.number];
+			if( ret.isNil, { 1 }, { ret });
+		},
+		set_cc: { arg self, ccid, val;
+			// TODO: use whole ccid
+			self.cc[ccid.number] = val;
+		},
+		cc: Dictionary.new,
 		selected: (
 			coor: 0 @ 0,
 			panel: \patlib,
@@ -793,10 +828,12 @@ make_cell_button = { arg parent, label, action;
 
 		params = player.getargs;
 		params.debug("params");
+		CCResponder.removeAll;
 
 		make_midi_cc_widget = { arg parent, paramid, ccid=nil;
-			var row_layout, ccname, param_val, cc_val, slider;
+			var row_layout, ccname, param_val, param_value, cc_val, slider;
 			var model;
+			var parentself = self;
 			row_layout = GUI.hLayoutView.new(parent, Rect(0,0,(self.width+10),30));
 			row_layout.background = Color.rand;
 			
@@ -804,46 +841,63 @@ make_cell_button = { arg parent, label, action;
 			ccname.string = "knob1";
 
 			param_val = GUI.staticText.new(row_layout, Rect(0,0,60,30));
-			param_val.string = "200";
+			param_value = player.get_arg(paramid);
+			param_val.string = param_value;
 
 			cc_val = GUI.staticText.new(row_layout, Rect(0,0,60,30));
-			cc_val.string = "231";
+			cc_val.string = paramid.asSpec.map(parentself.state.get_cc(ccid));
 
 			slider = GUI.slider.new(row_layout, Rect(0,0,60*6,30));
-			slider.value = param_val.string.asFloat / 500; // TODO: use Specs
+			slider.value = paramid.asSpec.unmap(param_value);
 
 			model = (
 				blocked: \not,
 				ccid: nil,
 				set_value: { arg self, cc_value;
 					var param_value;
+					"quoi".debug("2");
 					if(ccid.notNil, {
-						cc_val.value = cc_value;
+						"quoi".debug("3");
+						cc_val.string = cc_value;
 						self.unblock_do({
-							param_value = player.get(paramid);
+							"quoi".debug("4");
+							param_value = cc_value;
+							player.set_arg(paramid, param_value);
+							"quoi".debug("5");
 							param_val.string = param_value;
-							slider.value = param_value;
+							"quoi".debug("6");
+							slider.value = paramid.asSpec.unmap(param_value);
 						});
 					}, {
+						"quoi".debug("7");
 						param_val.string = cc_value;
-						slider.string = cc_value;
+						"quoi".debug("8");
+						slider.value = paramid.asSpec.unmap(param_value);
 					});
 				},
 
 				unblock_do: { arg self, fun;
-					var cc_value = self.state.get_cc(ccid), param_value = player.get(paramid) ;
+					var cc_value = parentself.state.get_cc(ccid), param_value = player.get_arg(paramid) ;
+
+					param_value.debug("unblock_do param_value");
+					paramid.debug("unblock_do paramid");
+					player.data.debug("unblock_do data");
+					player.getargs.debug("unblock_do getargs");
+					param_value = paramid.asSpec.unmap(param_value);
 
 					switch(self.blocked,
 						\not, fun,
 						\sup, {
-							if({ cc_value <= param_value }, {
+							if( cc_value <= param_value , {
 								self.blocked = \not;
+								param_val.background = Color.green;
 								fun.value;
 							});
 						},
 						\inf, {
-							if({ cc_value >= param_value }, {
+							if( cc_value >= param_value , {
 								self.blocked = \not;
+								param_val.background = Color.green;
 								fun.value;
 							});
 						}
@@ -852,35 +906,42 @@ make_cell_button = { arg parent, label, action;
 				},
 				
 				block: { arg self;
-					var cc_value = self.state.get_cc(self.ccid), param_value = player.get(paramid) ;
+					var cc_value = parentself.state.get_cc(self.ccid), param_value = player.get_arg(paramid) ;
+					param_value = paramid.asSpec.unmap(param_value);
 					case 
 						{ cc_value > param_value } {
 							self.blocked = \sup;
+							param_val.background = Color.red;
 						}
 						{ cc_value < param_value } {
 							self.blocked = \inf;
+							param_val.background = Color.red;
 						}
 						{ true } {
 							self.blocked = \not;
+							param_val.background = Color.green;
 						}
 				},
 
 				assign_cc: { arg self, ccid;
 					self.ccid = ccid;
+					ccname.string = ccid.name;
 
-					//self.ccresp = CCResponder({ |src,chan,num,value|
+					self.ccresp = CCResponder({ |src,chan,num,value|
 							//[src,chan,num,value].debug("==============CCResponder");
-					//		self.set_value(value);
-					//	},
-					//	ccid.source, // any source
-					//	ccid.channel, // any channel
-					//	ccid.number, // any CC number
-					//	ccid.val // any value
-					//);
+							parentself.state.set_cc(ccid, value/127);
+							self.set_value(paramid.asSpec.map(value/127));
+						},
+						ccid.source, // any source
+						ccid.channel, // any channel
+						ccid.number, // any CC number
+						ccid.val // any value
+					);
 				}
 
 			);
 			model.assign_cc(ccid);
+			model.block;
 			model;
 		};
 
@@ -890,18 +951,21 @@ make_cell_button = { arg parent, label, action;
 			row_layout.background = Color.rand;
 
 			name.debug("name");
-			player.get(name).debug("get param");
+			player.get_arg(name).debug("get param");
 
 			change_line = { arg fun;
-				var line;
-				line = player.get(name);
-				player.set_param(name, fun.(line));
+				var line, eline;
+				line = player.get_arg(name);
+				line.debug("change_line line");
+				eline = fun.(line.copy);
+				eline.debug("change_line eline");
+				player.set_arg(name, eline);
 			};
 			model = (
 				bar_length: 16,
 				viewport: 0 @ 16,
 				draw_buttons: { arg self;
-					player.get(name)[self.viewport.x .. self.viewport.y].do { arg step, stepidx;
+					player.get_arg(name)[self.viewport.x .. self.viewport.y].do { arg step, stepidx;
 						make_cell_button.(row_layout, stepidx);
 					};
 				},
@@ -909,8 +973,16 @@ make_cell_button = { arg parent, label, action;
 					row_layout.children[idx];
 				},
 				toggle: { arg self, idx;
-					change_line.(_[idx] = ~toggle_value.(_[idx]));
-					~toggle_button.(self.get_button(idx));
+					idx.debug("toggle");	
+					change_line.({ arg line;
+						if( line[idx].notNil, {
+							line[idx] = ~toggle_value.(line[idx]);
+						});
+						line;
+					});
+					if(self.get_button(idx).notNil, {
+						~toggle_button.(self.get_button(idx));
+					});
 				},
 				add_bar: { arg self, default=0;
 					change_line.(_ ++ ( default ! self.bar_length ));
@@ -923,9 +995,9 @@ make_cell_button = { arg parent, label, action;
 
 				make_shortcuts: { arg self;
 					var dict = Dictionary.new;
-					dict[ [0, ~numpad[\plus]] ] = { self.add_bar };
-					dict[ [0, ~numpad[\minus]] ] = { self.del_bar };
-					~kb8x2line.do { arg kc, idx;
+					//dict[ [0, ~numpad[\plus]] ] = { self.add_bar };
+					//dict[ [0, ~numpad[\minus]] ] = { self.del_bar };
+					~kbpad8x4[0].do { arg kc, idx;
 						dict[ [0, kc ] ] = { self.toggle(idx) };
 					};
 					dict;
@@ -934,6 +1006,7 @@ make_cell_button = { arg parent, label, action;
 			);
 
 			model.draw_buttons;
+			self.kb_handler.putAll( model.make_shortcuts );
 			model;
 		};
 		main_layout = GUI.vLayoutView.new(parent, Rect(0,0,(self.width+10),60*6));
@@ -950,6 +1023,7 @@ make_cell_button = { arg parent, label, action;
 			source: nil,
 			channel: nil,
 			number: ~cakewalk[\slider][0],
+			name: "slider0",
 			val: nil
 		));
 
@@ -979,6 +1053,7 @@ make_cell_button = { arg parent, label, action;
 					source: nil,
 					channel: nil,
 					number: ~cakewalk[\knob][knobidx],
+					name: "knob" ++ knobidx,
 					val: nil
 				);
 			});
@@ -1049,24 +1124,26 @@ make_cell_button = { arg parent, label, action;
 
 ~patlib = [
 
-\bla -> { arg type, stepline = #[1,1,0,1], freq = 300;
+\bla -> { arg amp=0.1, type, stepline = #[1,1,0,1], freq = 300;
 
 	Pbind(
 		\instrument, \bubblebub,
 		\freq, freq,
-		\stepline, stepline,
+		\stepbine, stepline,
+		\amp, amp,
 		\type, type
 	)
 
 
 },
-\rah -> { arg type, stepline = #[1,1,0,1], freq = 300;
+\rah -> { arg amp=0.1, type, stepline = #[1,1,0,1], freq = 300;
 
 	Pbind(
 		\instrument, \bubblebub,
 		\pitchcurvelen, 0.5,
 		\freq, freq,
 		\stepline, stepline,
+		\amp, amp,
 		\type, type
 	)
 
@@ -1080,178 +1157,7 @@ make_cell_button = { arg parent, label, action;
 
 )
 
-
-
-
-(
-~make_player = { arg patfun;
-	var get, data, nodeproxy;
-	data = {
-		var dict = Dictionary.new;
-		patfun.defaultArgs.debug("defaultArgs");
-		patfun.argNames.do({ arg argName, idx;
-			argName.debug("argName");
-			idx.debug("idx");
-			dict[argName] = patfun.defaultArgs[idx];
-		});
-		dict.debug("dict");
-		dict;
-	}.value;
-	get = { arg argName;
-		argName.debug("get");
-		data[argName].debug("get ret");
-		data[argName];
-	};
-
-	nodeproxy = NodeProxy.audio(s, 2);
-	nodeproxy.source = patfun.valueArray( patfun.argNames.collect({ arg argName;
-		switch(argName, 
-			\stepline, { 
-				var repeat = 100;
-				Prout({
-					var idx;
-					repeat.do {
-						idx = 0;
-						while( { get.(argName)[idx].notNil } , { 
-							get.(argName)[idx].debug("argname");
-							get.(argName)[idx].yield;
-							idx = idx + 1;
-						});
-					}
-				})
-			},
-			\type, {
-				Pif( Pkey(\stepline) > 0 , \note, \rest) // WTF with == ?????
-			},
-			//default:
-			{
-				Prout({
-					var repeat = 100;
-					repeat.do {
-						get.(argName).yield;
-					}
-				})
-			}
-		);
-	}));
-
-			
-
-	(
-		patfun: patfun,
-		node: nodeproxy,
-		data: data,
-		get: get,
-		set: { arg self, argName, val;
-			data[argName] = val;
-		},
-		getargs: { arg self; patfun.argNames }
-	)
-};
-
-~p = ~make_player.({ arg type, stepline = #[1,1,0,1], freq = 300;
-	//arg freq = 300;
-
-	Pbind(
-		\freq, freq,
-		\stepline, stepline,
-		\type, type
-		//\type, \note
-	)
-
-
-});
-
-~p.node.play;
-//~p.node.source.patternpairs;
-)
-
-(
-~pp = NodeProxy.audio(s, 2);
-	~pp.source = Pbind(
-		\freq, 300,
-		\stepline,
-				Prout({
-					var idx;
-					var tab = [1,1,0,1];
-					100.do {
-						idx = 0;
-						while( { tab[idx].notNil } , { 
-							tab[idx].yield;
-							idx = idx + 1;
-						});
-					}
-				}),
-		\type, Pif( Pkey(\stepline) > 0 , \note, \rest) // WTF with == ?????
-	);
-	~pp.play
-)
-
-
-
-UniqueID.next;
-(
-
-		~s = "blsdkfj_l452452";
-		~s[ .. ~s.findBackwards("_l")  ]
-
-)
-"foobar".findRegexp("o*bar");
-
-{ arg bla; bla+1; }.def.dump
-
-
-
-
-
-
-
-
-
-
-b = NodeProxy.audio(s, 2);
-
-b.source = { PinkNoise.ar(0.2.dup) };
-b.play
-
-a = PatternProxy.new;
-
-a.play; // play to hardware output, return a group with synths
-
-
-// setting the source
-
-a.source = { SinOsc.ar([350, 351.3], 0, 0.2) };
-
-
-// the proxy has two channels now:
-
-a.numChannels.postln;
-
-a.source = { SinOsc.ar([390, 286] * 1.2, 0, 0.2) };
-
-
-(
-a.source = 
-	Pbind(
-		\freq, Prout({
-			100.do {
-				"plop".postln;
-				300.yield;
-			}
-		})
-		//\type, \note
-	);
-)
-(
-a.source = 
-	Pbind(
-		\freq, Pfunc({
-				"plop".postln;
-				300;
-		})
-		//\type, \note
-	);
-)
-["stepline", "amp", "type", "freq", "bla"].reject({ arg it; ["stepline","amp","type"].includes(it)})
-List[\stepline,\amp,\type].includes(\amp)
+~a = #[0,1,0,1];
+~a[1] = 10;
+~b = ~a.copy
+~b[1] = 10;
