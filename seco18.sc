@@ -67,6 +67,29 @@ var make_widget_list_view, make_header_button, make_cell_button;
 	[113, 115, 100, 102, 103, 104, 106, 107 ],
 	[119, 120, 99, 118, 98, 110, 44, 59 ]
 ];
+~kbcalphanum = {
+	var dict = Dictionary.new;
+	//TODO: only for Ctrl (262144) modifier, do others
+	//NOTE: ^W close the window
+	var keycodes = [
+			[ 38, 233, 34, 39, 40, 45, 232, 31, 231, 224, 41, 61 ],
+			[ 1, 26, 5, 18, 20, 25, 21, 9, 15, 16, 36 ],
+			[ 17, 19, 4, 6, 7, 8, 10, 11, 12, 13, 249, 42], 
+			[60, 24, 3, 22, 2, 14, 44, 59, 58, 33]
+	];
+	var alnum = [
+		"1234567890)=",
+		"azertyuiop^$",
+		"qsdfghjklmù*",
+		"<xcvbn,;:!"
+	];
+	keycodes.do { arg row, rowidx;	
+		row.do { arg kc, kcidx;
+			dict[ alnum[rowidx][kcidx].asString ] = kc;
+		};
+	};
+	dict;
+}.value;
 ~kb8x2line = [
 	38, 97, 233, 122, 34, 101, 39, 114, 40, 166, 45, 121, 232, 117, 95, 105
 ];
@@ -151,99 +174,158 @@ make_cell_button = { arg parent, label, action;
 	});
 };
 
-~make_player = { arg patfun, data=nil;
+~make_event_key_reader = { arg argName, get_arg;
+	switch(argName, 
+		\stepline, { 
+			var repeat = inf;
+			Prout({
+				var idx;
+				repeat.do {
+					idx = 0;
+					while( { get_arg(argName)[idx].notNil } , { 
+						get_arg(argName)[idx].debug("stepline yield");
+						get_arg(argName).debug("step nil");
+						idx.debug("step idx");
+						get_arg(argName)[idx].yield;
+						idx = idx + 1;
+					});
+					self.get_arg(argName).debug("step nil");
+				}
+			})
+		},
+		\type, {
+			Pif( Pkey(\stepline) > 0 , \note, \rest) // WTF with == ?????
+		},
+		//default:
+		{
+			//self.data[argName] = PatternProxy.new;
+			Prout({
+				var repeat = inf;
+				repeat.do {
+					get_arg(argName).debug(argName++" yield");
+					get_arg(argName).yield;
+				}
+			})
+		}
+	);
+};
+
+~make_player_data = { arg self, data;
+
+	var dict;
+	if( data.isNil, {
+		dict = Dictionary.new;
+		self.getargs.do({ arg argName, idx;
+			dict[argName] = self.get_default_args[idx];
+		});
+	}, {
+		dict = Dictionary.new;
+		self.getargs.do({ arg argName, idx;
+			dict[argName] = data[argName];
+		});
+	});
+	dict;
+
+};
+
+~player_get_arg = { arg self, argName;
+	var ret;
+	ret = if(self.getargs.includes(argName), {
+		if([\type, \stepline].includes(argName), {
+			self.data[argName];
+		}, {
+			//self.data[argName].source;
+			self.data[argName];
+		})
+	}, {
+		("ERROR: player: no such arg: " ++ argName).postln;
+		nil;
+	});
+	ret.debug("get_arg ret");
+	ret;
+};
+
+~player_set_arg = { arg self, argName, val;
+	if([\type, \stepline].includes(argName), {
+		self.data[argName] = val;
+	}, {
+		//self.data[argName].source = val;
+		self.data[argName] = val;
+	})
+};
+
+~make_player_from_synthdef = { arg defname, data=nil;
+	var desc = SynthDescLib.global.synthDescs[defname];
+	player = (
+		init: {
+
+			self.data = ~make_player_data.(self, data);
+
+			if( self.data[\dur].isNil, {
+				self.data[\dur] = 0.5;
+			});
+
+			self.node.source: {
+				var proxy = EventPatternProxy.new;
+				var dict = Dictionary.new;
+				desc.controls.do { arg control;
+					dict[control.name] = ~make_event_key_reader.(control.name, self.get_arg)
+				}
+				dict[\instrument] = defname
+				dict[\type] = ~make_event_key_reader.(\type, {});
+				dict[\stepline] = ~make_event_key_reader.(\stepline, self.get_arg);
+				dict[\dur] = ~make_event_key_reader.(\dur, self.get_arg);
+				Pbind(*dict);
+			}
+		},
+
+		clone: { arg self;
+			~make_player_from_synthdef.(defname, self.data);
+		},
+
+		getargs: desc.controls.collect(_.name),
+		get_default_args: desc.controls.collect(_.defaultValue),
+		self.node = EventPatternProxy.new
+
+		get_arg: ~player_get_arg,
+		set_arg: ~player_set_arg,
+	)
+};
+
+~make_player_from_patfun = { arg patfun, data=nil;
 	var player;
 	player = (
 		init: { arg self;
 
-			self.data = {
-				var dict;
-				patfun.argNames.debug("patfun argNames");
-				patfun.def.sourceCode.debug("source");
-				if( data.isNil, {
-					dict = Dictionary.new;
-					patfun.argNames.do({ arg argName, idx;
-						dict[argName] = patfun.defaultArgs[idx];
-					});
-				}, {
-					dict = Dictionary.new;
-					patfun.argNames.do({ arg argName, idx;
-						dict[argName] = data[argName];
-					});
-				});
-				dict.debug("bordel dict");
-				dict;
-			}.value;
+			self.data = ~make_player_data.(self, data);
 
-			self.node.source = patfun.valueArray( patfun.argNames.collect({ arg argName;
-				switch(argName, 
-					\stepline, { 
-						var repeat = 100;
-						Prout({
-							var idx;
-							repeat.do {
-								idx = 0;
-								while( { self.get_arg(argName)[idx].notNil } , { 
-									self.get_arg(argName)[idx].debug("yield");
-									self.get_arg(argName)[idx].yield;
-									idx = idx + 1;
-								});
-							}
-						})
-					},
-					\type, {
-						Pif( Pkey(\stepline) > 0 , \note, \rest) // WTF with == ?????
-					},
-					//default:
-					{
-						//self.data[argName] = PatternProxy.new;
-						Prout({
-							var repeat = 100;
-							repeat.do {
-								self.get_arg(argName).yield;
-							}
-						})
-					}
-				);
-			}));
+			self.node.source = patfun.valueArray( patfun.argNames.collect(~make_event_key_reader.(_, self.get_arg)));
 		},
 		patfun: { arg self; patfun; },
+		clone: { arg self;
+			~make_player_from_patfun.(patfun, self.data);
+		},
 		node: EventPatternProxy.new,
-		data: data,
-		get_arg: { arg self, argName; 
-			if(self.getargs.includes(argName), {
-				if([\type, \stepline].includes(argName), {
-					self.data[argName];
-				}, {
-					//self.data[argName].source;
-					self.data[argName];
-				})
-			}, {
-				("ERROR: player: no such arg: " ++ argName).postln;
-				nil;
-			});
-		},
-		set_arg: { arg self, argName, val;
-			if([\type, \stepline].includes(argName), {
-				self.data[argName] = val;
-			}, {
-				//self.data[argName].source = val;
-				self.data[argName] = val;
-			})
-		},
-		getargs: { arg self; self.patfun.argNames }
+		get_arg: ~player_get_arg,
+		set_arg: ~player_set_arg
 	);
 	player.init;
 	player;
 };
 
-
-~clone_player = { arg player;
-	var newplayer;
-	player.debug("clone player");
-	newplayer = ~make_player.(player.patfun, player.data);	
-	//newplayer.data.putAll(player.data);
-	newplayer;
+~make_player = { arg instr, data=nil;
+	var player = nil;
+	case(
+		{ instr.isSymbol } {
+			player = ~make_player_from_synthdef.(instr, data);
+		}, 
+		{ instr.isFunction } {
+			player = ~make_player_from_patfun.(instr, data);
+		}
+		{ ("ERROR: player type not recognized:"++instr).postln }
+	);
+	player.init;
+	player;
 };
 
 ~mk_sequencer = {(
@@ -323,10 +405,10 @@ make_cell_button = { arg parent, label, action;
 		},
 		cc: Dictionary.new,
 		selected: (
-			coor: 0 @ 0,
-			panel: \patlib,
+			coor: 0 @ 1,
+			panel: \parlive,
 			bank: 0,
-			kind: \libnode // \libnode, \node, \nodegroup
+			kind: \node // \libnode, \node, \nodegroup
 		),
 		current: (
 			panel: \patlib,
@@ -390,7 +472,7 @@ make_cell_button = { arg parent, label, action;
 		newlivenodename.debug("newlivenodename");
 		livenodename.debug("livenodename");
 		self.model.livenodepool.debug("livenodepool");
-		self.model.livenodepool[newlivenodename] = ~clone_player.(self.model.livenodepool[livenodename]);
+		self.model.livenodepool[newlivenodename] = self.model.livenodepool[livenodename].clone;
 		newlivenodename;
 	},
 
@@ -444,6 +526,36 @@ make_cell_button = { arg parent, label, action;
 	handlers: { arg self, input;
 		input.debug("=====#############====== EVENT");
 		switch( input[0],
+			\select_libnode, {
+				var libnode_name;
+				var livenode_name;
+				var source_coor = input[1];
+				var source_bank = self.state.current.bank;
+				var target_sel = self.state.selected.deepCopy;
+				var sel = self.state.selected;
+
+				self.state.selected.debug("select_libnode selected");
+
+				libnode_name = self.model.patlib[source_bank][source_coor.x][source_coor.y];
+				livenode_name = self.make_livenode_from_libnode(libnode_name);
+
+				livenode_name.debug("new livenode name");
+
+				target_sel.coor.y = target_sel.coor.y-1;
+				self.model.set_parlive(target_sel, livenode_name);
+
+				self.model.debug("MODEL");
+
+				// back to parlive panel
+
+				self.state.current.panel = \parlive;
+				self.state.current.bank = self.state.panel[\parlive].bank;
+				self.refresh_current_panel;
+
+				self.refresh_button_at(sel, livenode_name);
+				self.sync_button_state(sel);
+
+			},
 			\select, {
 				var coor = input[1];
 				var oldsel = self.state.selected.deepCopy;
@@ -568,6 +680,7 @@ make_cell_button = { arg parent, label, action;
 					player.node.dump;	
 					player.node.source.dump;	
 					player.node.play;	
+					"fin play".debug;
 
 				});
 			},
@@ -587,6 +700,8 @@ make_cell_button = { arg parent, label, action;
 
 		self.kb_handler = Dictionary.new;
 
+		// Fx functions
+
 		self.kb_handler[ [~modifiers.fx, ~kbfx[0]] ] = { self.handlers( [\copy] ) };
 		self.kb_handler[ [~modifiers.fx, ~kbfx[1]] ] = { self.handlers( [\cut] ) };
 		self.kb_handler[ [~modifiers.fx, ~kbfx[3]] ] = { self.handlers( [\paste] ) };
@@ -594,9 +709,42 @@ make_cell_button = { arg parent, label, action;
 		self.kb_handler[ [~modifiers.fx, ~kbfx[4]] ] = { self.handlers( [\play_selected] ) };
 		self.kb_handler[ [~modifiers.fx, ~kbfx[5]] ] = { self.handlers( [\stop_selected] ) };
 
-		self.kb_handler[ [~modifiers.fx, ~kbfx[8]] ] = { self.handlers( [\change_panel, \patlib] ) };
-		self.kb_handler[ [~modifiers.fx, ~kbfx[9]] ] = { self.handlers( [\change_panel, \parlive] ) };
-		self.kb_handler[ [~modifiers.fx, ~kbfx[10]] ] = { self.handlers( [\change_panel, \editplayer] ) };
+		self.kb_handler[ [~modifiers.fx, ~kbfx[8]] ] = { self.handlers( [\change_panel, \parlive] ) };
+		self.kb_handler[ [~modifiers.fx, ~kbfx[9]] ] = { self.handlers( [\change_panel, \patlib] ) };
+		self.kb_handler[ [~modifiers.fx, ~kbfx[11]] ] = { self.handlers( [\change_panel, \editplayer] ) };
+
+		// quant
+
+		self.kb_handler[ [~modifiers.ctrl, ~kbcalphanum["q"]] ] = { 
+			
+			~kbnumpad.do { arg keycode, idx;
+				self.kb_handler[[0, keycode]] = { 
+					EventPatternProxy.defaultQuant = idx;
+
+					// restore bank change shortcuts
+					~kbnumpad.do { arg keycode, idx;
+						self.kb_handler[[0, keycode]] = { self.handlers( [\change_bank, idx] ) };
+					};
+
+					("=== EventPatternProxy.defaultQuant changed to: " ++ EventPatternProxy.defaultQuant).postln;
+				};
+			};
+			
+		};
+
+
+
+		self.window.view.keyDownAction = { arg view, char, modifiers, u, k; 
+			u.debug("ooooooooooooo u");
+			modifiers.debug("ooooooooooooo modifiers");
+			self.kb_handler[[modifiers,u]].value
+		};
+
+
+	},
+
+
+	make_parlive_handlers: { arg self;
 
 		~kbpad8x4.do { arg line, iy;
 			line.do { arg key, ix;
@@ -608,11 +756,23 @@ make_cell_button = { arg parent, label, action;
 			self.kb_handler[[0, keycode]] = { self.handlers( [\change_bank, idx] ) };
 		};
 
-		self.window.view.keyDownAction = { arg view, char, modifiers, u, k; 
-			u.debug("ooooooooooooo u");
-			modifiers.debug("ooooooooooooo modifiers");
-			self.kb_handler[[modifiers,u]].value
+	},
+
+	make_patlib_handlers: { arg self;
+
+		~kbpad8x4.do { arg line, iy;
+			line.do { arg key, ix;
+				self.kb_handler[[0, key]] = { self.handlers( [\select_libnode, ix @ iy] ) };
+			}
 		};
+
+		~kbnumpad.do { arg keycode, idx;
+			self.kb_handler[[0, keycode]] = { self.handlers( [\change_bank, idx] ) };
+		};
+
+	},
+	
+	make_editplayer_handlers: { arg self;
 
 
 	},
@@ -962,12 +1122,18 @@ make_cell_button = { arg parent, label, action;
 				player.set_arg(name, eline);
 			};
 			model = (
-				bar_length: 16,
+				bar_length: 4,
 				viewport: 0 @ 16,
 				draw_buttons: { arg self;
+					row_layout.removeAll;
 					player.get_arg(name)[self.viewport.x .. self.viewport.y].do { arg step, stepidx;
-						make_cell_button.(row_layout, stepidx);
+						var bt;
+						bt = make_cell_button.(row_layout, stepidx);
+						if( step == 1, { ~toggle_button.(bt) });
 					};
+					row_layout.dump;
+					row_layout.children.dump;
+					row_layout.children[0].dump;
 				},
 				get_button: { arg self, idx;
 					row_layout.children[idx];
@@ -989,14 +1155,17 @@ make_cell_button = { arg parent, label, action;
 					self.draw_buttons;
 				},
 				del_bar: { arg self, default=0;
-					change_line.( _[ .. (0 - self.bar_length) ] );
+					change_line.({ arg line;
+						var ll = line.size;
+						line[ .. (line.size - self.bar_length -1 ) ] 
+					});
 					self.draw_buttons;
 				},
 
 				make_shortcuts: { arg self;
 					var dict = Dictionary.new;
-					//dict[ [0, ~numpad[\plus]] ] = { self.add_bar };
-					//dict[ [0, ~numpad[\minus]] ] = { self.del_bar };
+					dict[ [0, ~numpad[\plus]] ] = { self.add_bar };
+					dict[ [~modifiers.ctrl, ~numpad[\plus]] ] = { self.del_bar };
 					~kbpad8x4[0].do { arg kc, idx;
 						dict[ [0, kc ] ] = { self.toggle(idx) };
 					};
@@ -1083,6 +1252,7 @@ make_cell_button = { arg parent, label, action;
 		self.clear_current_panel.value;
 		self.state.current.panel = \parlive;
 		self.make_parlive_view;
+		self.make_parlive_handlers;
 		self.window.view.focus(true);
 	},
 
@@ -1090,6 +1260,7 @@ make_cell_button = { arg parent, label, action;
 		self.clear_current_panel.value;
 		self.state.current.panel = \patlib;
 		self.make_patlib_view;
+		self.make_patlib_handlers;
 		self.window.view.focus(true);
 	},
 
@@ -1097,6 +1268,7 @@ make_cell_button = { arg parent, label, action;
 		self.clear_current_panel.value;
 		self.state.current.panel = \editplayer;
 		self.make_editplayer_view;
+		self.make_editplayer_handlers;
 		self.window.view.focus(true);
 	},
 
@@ -1113,7 +1285,7 @@ make_cell_button = { arg parent, label, action;
 	make_gui: { arg self;
 		self.window = self.make_window.value;
 		self.make_kb_handlers;
-		self.show_patlib_panel;
+		self.show_parlive_panel;
 
 	}
 
@@ -1124,13 +1296,14 @@ make_cell_button = { arg parent, label, action;
 
 ~patlib = [
 
-\bla -> { arg amp=0.1, type, stepline = #[1,1,0,1], freq = 300;
+\bla -> { arg amp=0.1, type, stepline = #[1,1,0,1], freq = 500;
 
 	Pbind(
 		\instrument, \bubblebub,
 		\freq, freq,
-		\stepbine, stepline,
+		\stepline, stepline,
 		\amp, amp,
+		\dur, 0.25,
 		\type, type
 	)
 
@@ -1144,6 +1317,7 @@ make_cell_button = { arg parent, label, action;
 		\freq, freq,
 		\stepline, stepline,
 		\amp, amp,
+		\dur, 0.5,
 		\type, type
 	)
 
@@ -1161,3 +1335,41 @@ make_cell_button = { arg parent, label, action;
 ~a[1] = 10;
 ~b = ~a.copy
 ~b[1] = 10;
+
+(
+
+~p = ~make_player.(
+
+{ arg amp=0.1, type, stepline = #[1,1,0,1], freq = 300;
+
+	Pbind(
+		\instrument, \bubblebub,
+		\freq, freq,
+		\stepline, stepline,
+		\amp, amp,
+		//\type, Pif( Pkey(\stepline) > 0 , \note, \rest)
+		\type, type
+	)
+
+
+}
+);
+~p.node.play;
+)
+
+(
+	Pbind(
+		\instrument, \bubblebub,
+		\freq, 300,
+		\stepline, 1,
+		\amp, 0.1,
+		\type, Pif( Pkey(\stepline) > 0 , \note, \rest)
+	).play
+)
+
+~kbcalphanum[$q]
+~kbcalphanum["q"]
+$q.asString.dump
+
+
+
