@@ -1,3 +1,9 @@
+s.boot;
+
+
+(
+Document.dir = "/home/ggz/code/sc/";
+)
 
 (
 
@@ -35,7 +41,7 @@ SynthDef(\bubblebub, {	|out=0, t_trig=1, attack=0.01, decay=0.08, pitchcurvelen=
 	// high-pass to remove any lowpitched artifacts, scale amplitude
 	son = HPF.ar(son, 500) * amp * 10;
 	Out.ar(out, son);
-}).add;
+}).store;
 
 SynthDef("tish", { arg freq = 1200, rate = 2;
 
@@ -47,7 +53,7 @@ osc = {WhiteNoise.ar(trg)}.dup;
 
 Out.ar(0, osc); // send output to audio bus zero.
 
-}).send(s);
+}).store;
 
 
 SynthDef(\bass, { |gate = 1, t_trig = 1, freq, freqlag = 0.1, ffreq = 1500, rq = 0.1, filtAttack = 0,
@@ -57,14 +63,14 @@ SynthDef(\bass, { |gate = 1, t_trig = 1, freq, freqlag = 0.1, ffreq = 1500, rq =
 	sig = RLPF.ar(sig, ffreq * fenv, rq, amp)
 		* EnvGen.kr(Env.adsr(0.01, 0.2, 0.5, 0.08), (gate > 0) - (t_trig > 0), doneAction: 2);
 	Out.ar(out, sig ! 2);
-}).send(s);
-Spec.add(\ffreq, \freq); 
+}, metadata: (specs: (\ffreq: \freq)) ).store;
 
 )
 
 
 (
 
+"seco19.sc".loadDocument;
 
 
 ~patlib = [
@@ -115,8 +121,13 @@ Spec.add(\ffreq, \freq);
 
 ];
 
+~synthlib = [
+\bass -> \bass,
+\pgrain -> \pgrain
+];
+
 ~seq = ~mk_sequencer.value;
-~seq.load_patlib( ~patlib );
+~seq.load_patlib( ~synthlib );
 ~seq.make_gui;
 )
 
@@ -135,3 +146,38 @@ SynthDescLib.global.synthDescs[\pgrain].controlNames
 ~p = EventPatternProxy.new
 ~p.source = \pgrain
 ~p.play
+
+
+~d = Dictionary[\bla -> 1 , \rah -> 140]
+~d.keys
+
+~li = List.new;
+~d.pairsDo({ arg key, val; ~li.add(key); ~li.add(val)})
+~li
+Pbind(* ~li )
+[bla: 4]
+
+(
+
+// Alternative syntax, using a key/pattern array:
+
+
+Pbind(*[
+
+instrument: \test, 
+
+nharms: Pseq([4, 10, 40], inf), 
+
+dur: Pseq([1, 1, 2, 1]/10, inf), 
+
+#[freq, sustain],  Ptuple([
+
+Pseq( (1..16) * 50, 4), 
+
+Pseq([1/10, 0.5, 1, 2], inf)
+
+]), 
+
+]).play
+
+)
