@@ -152,7 +152,11 @@ make_cell_button = { arg parent, label, action;
 	});
 };
 
-~make_event_key_reader = { arg argName, get_arg;
+// ==========================================
+// PLAYER FACTORY
+// ==========================================
+
+~make_event_key_reader = { arg argName, self;
 	switch(argName, 
 		\stepline, { 
 			var repeat = inf;
@@ -160,14 +164,14 @@ make_cell_button = { arg parent, label, action;
 				var idx;
 				repeat.do {
 					idx = 0;
-					while( { get_arg(argName)[idx].notNil } , { 
-						get_arg(argName)[idx].debug("stepline yield");
-						get_arg(argName).debug("step nil");
+					while( { self.get_arg(argName)[idx].notNil } , { 
+						self.get_arg(argName)[idx].debug("stepline yield");
+						self.get_arg(argName).debug("step nil");
 						idx.debug("step idx");
-						get_arg(argName)[idx].yield;
+						self.get_arg(argName)[idx].yield;
 						idx = idx + 1;
 					});
-					get_arg(argName).debug("step nil");
+					self.get_arg(argName).debug("step nil");
 				}
 			})
 		},
@@ -180,37 +184,19 @@ make_cell_button = { arg parent, label, action;
 			Prout({
 				var repeat = inf;
 				repeat.do {
-					get_arg(argName).debug(argName++" yield");
-					get_arg(argName).yield;
+					self.get_arg(argName).debug(argName++" yield");
+					self.get_arg(argName).yield;
 				}
 			})
 		}
 	);
 };
 
-~make_player_data = { arg self, data;
-
-	var dict;
-	if( data.isNil, {
-		dict = Dictionary.new;
-		self.getargs.do({ arg argName, idx;
-			dict[argName] = self.get_default_args[idx];
-		});
-	}, {
-		dict = Dictionary.new;
-		self.getargs.do({ arg argName, idx;
-			dict[argName] = data[argName];
-		});
-	});
-	dict;
-
-};
-
 ~player_get_arg = { arg self, argName;
 	var ret;
 	argName.dump;
-	self.getargs.dumpAll;
-	ret = if(self.getargs.includes(argName), {
+	self.get_args.do { arg an; an.debug("an====").dump };
+	ret = if(self.get_args.includes(argName), {
 		if([\type, \stepline].includes(argName), {
 			self.data[argName];
 		}, {
@@ -234,6 +220,18 @@ make_cell_button = { arg parent, label, action;
 	})
 };
 
+~get_spec = { arg argName, defname=nil, default_spec=\freq;
+	if( argName.asSpec.notNil, {
+		argName.asSpec;
+	}, {
+		var spec = default_spec.asSpec;
+		try { 
+			spec = SynthDescLib.global.synthDescs[defname].metadata.specs[argName].asSpec
+		};
+		spec;
+	});
+};
+
 ~make_player_from_synthdef = { arg defname, data=nil;
 	var player;
 	var desc = SynthDescLib.global.synthDescs[defname];
@@ -242,11 +240,23 @@ make_cell_button = { arg parent, label, action;
 	player = (
 		init: { arg self;
 
-			self.data = ~make_player_data.(self, data);
+			self.data = {
+					// use args and defaults values from synthdef to build data dict
+					// if data dict given, deep copy it instead
+					var dict;
+					dict = Dictionary.new;
+					if( data.isNil, {
+						desc.controls.do({ arg control;
+							dict[control.name.asSymbol] = control.defaultValue;
+						});
+					}, {
+						dict = data.deepCopy;
+					});
+					dict;
+			}.value;
 
-			if( self.data[\dur].isNil, {
-				self.data[\dur] = 0.5;
-			});
+			self.data[\dur] = self.data[\dur] ?? 0.5;
+			self.data[\legato] = self.data[\legato] ?? 0.8;
 
 			self.data[\stepline] = [1,1,1,1]; // TODO: make it dyn
 
@@ -256,16 +266,11 @@ make_cell_button = { arg parent, label, action;
 				var proxy = EventPatternProxy.new;
 				var dict = Dictionary.new;
 				var list = List[];
-				desc.controls.do { arg control;
-					control.debug("making control");
-					self.get_arg(_).debug("getarg");
-					"DD".debug("getarg");
-					dict[control.name] = ~make_event_key_reader.(control.name, self.get_arg(_))
+				self.data.keys.do { arg argName;
+					dict[argName] = ~make_event_key_reader.(argName, self)
 				};
 				dict[\instrument] = defname;
-				dict[\type] = ~make_event_key_reader.(\type, {});
-				dict[\stepline] = ~make_event_key_reader.(\stepline, self.get_arg);
-				dict[\dur] = ~make_event_key_reader.(\dur, self.get_arg);
+				dict[\type] = ~make_event_key_reader.(\type, self);
 				dict.debug("maked pbind dict");
 				dict.pairsDo({ arg key, val; list.add(key); list.add(val)});
 				Pbind(*list);
@@ -275,15 +280,16 @@ make_cell_button = { arg parent, label, action;
 		clone: { arg self;
 			~make_player_from_synthdef.(defname, self.data);
 		},
-
-		getargs: { arg self;
-			if( self.data.isNil, {
-				desc.controls.collect({ arg ii; ii.name.asSymbol});
-			}, {
-				self.data.keys
-			});
+		map: { arg self, argName, val;
+			~get_spec.(argName, defname).map(val);
 		},
-		get_default_args: desc.controls.collect(_.defaultValue),
+		unmap: { arg self, argName, val;
+			~get_spec.(argName, defname).unmap(val);
+		},
+
+		get_args: { arg self;
+			self.data.keys
+		},
 		node: EventPatternProxy.new,
 
 		get_arg: ~player_get_arg,
@@ -296,13 +302,35 @@ make_cell_button = { arg parent, label, action;
 	player = (
 		init: { arg self;
 
-			self.data = ~make_player_data.(self, data);
+			self.data = {
+					// use args and defaults values from synthdef to build data dict
+					// if data dict given, deep copy it instead
+					var dict;
+					dict = Dictionary.new;
+					if( data.isNil, {
+						patfun.argNames.do({ arg argName, idx;
+							dict[argName] = patfun.defaultArgs[idx];
+						});
+					}, {
+						dict = data.deepCopy;
+					});
+					dict;
+			}.value;
 
-			self.node.source = patfun.valueArray( patfun.argNames.collect(~make_event_key_reader.(_, self.get_arg)));
+			self.node.source = patfun.valueArray( patfun.argNames.collect({ arg argName;
+				~make_event_key_reader.(argName, self)
+			}));
 		},
 		patfun: { arg self; patfun; },
 		clone: { arg self;
 			~make_player_from_patfun.(patfun, self.data);
+		},
+		map: { arg self, argName, val;
+			// TODO: how to get synthdef spec
+			~get_spec.(argName).map(val);
+		},
+		unmap: { arg self, argName, val;
+			~get_spec.(argName).unmap(val);
 		},
 		node: EventPatternProxy.new,
 		get_arg: ~player_get_arg,
@@ -311,6 +339,8 @@ make_cell_button = { arg parent, label, action;
 	player.init;
 	player;
 };
+Spec.add(\dur, ControlSpec(4/128, 4, \lin, 4/64, 0.25, "s"));
+Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 
 ~make_player = { arg instr, data=nil;
 	var player = nil;
@@ -326,6 +356,10 @@ make_cell_button = { arg parent, label, action;
 	player.init;
 	player;
 };
+
+// ==========================================
+// SEQUENCER FACTORY
+// ==========================================
 
 ~mk_sequencer = {(
 	model: (
@@ -985,7 +1019,7 @@ make_cell_button = { arg parent, label, action;
 
 		var player = self.get_selected_player;
 
-		params = player.getargs;
+		params = player.get_args;
 		params.debug("params");
 		CCResponder.removeAll;
 
@@ -1004,10 +1038,10 @@ make_cell_button = { arg parent, label, action;
 			param_val.string = param_value;
 
 			cc_val = GUI.staticText.new(row_layout, Rect(0,0,60,30));
-			cc_val.string = paramid.asSpec.map(parentself.state.get_cc(ccid));
+			cc_val.string = player.map(paramid, parentself.state.get_cc(ccid));
 
 			slider = GUI.slider.new(row_layout, Rect(0,0,60*6,30));
-			slider.value = paramid.asSpec.unmap(param_value);
+			slider.value = player.unmap(paramid, param_value);
 
 			model = (
 				blocked: \not,
@@ -1025,13 +1059,13 @@ make_cell_button = { arg parent, label, action;
 							"quoi".debug("5");
 							param_val.string = param_value;
 							"quoi".debug("6");
-							slider.value = paramid.asSpec.unmap(param_value);
+							slider.value = player.unmap(paramid, param_value);
 						});
 					}, {
 						"quoi".debug("7");
 						param_val.string = cc_value;
 						"quoi".debug("8");
-						slider.value = paramid.asSpec.unmap(param_value);
+						slider.value = player.unmap(paramid, param_value);
 					});
 				},
 
@@ -1041,8 +1075,8 @@ make_cell_button = { arg parent, label, action;
 					param_value.debug("unblock_do param_value");
 					paramid.debug("unblock_do paramid");
 					player.data.debug("unblock_do data");
-					player.getargs.debug("unblock_do getargs");
-					param_value = paramid.asSpec.unmap(param_value);
+					player.get_args.debug("unblock_do get_args");
+					param_value = player.unmap(paramid, param_value);
 
 					switch(self.blocked,
 						\not, fun,
@@ -1066,7 +1100,7 @@ make_cell_button = { arg parent, label, action;
 				
 				block: { arg self;
 					var cc_value = parentself.state.get_cc(self.ccid), param_value = player.get_arg(paramid) ;
-					param_value = paramid.asSpec.unmap(param_value);
+					param_value = player.unmap(paramid, param_value);
 					case 
 						{ cc_value > param_value } {
 							self.blocked = \sup;
@@ -1089,7 +1123,7 @@ make_cell_button = { arg parent, label, action;
 					self.ccresp = CCResponder({ |src,chan,num,value|
 							//[src,chan,num,value].debug("==============CCResponder");
 							parentself.state.set_cc(ccid, value/127);
-							self.set_value(paramid.asSpec.map(value/127));
+							self.set_value(player.map(paramid, value/127));
 						},
 						ccid.source, // any source
 						ccid.channel, // any channel
@@ -1177,7 +1211,7 @@ make_cell_button = { arg parent, label, action;
 			self.kb_handler.putAll( model.make_shortcuts );
 			model;
 		};
-		main_layout = GUI.vLayoutView.new(parent, Rect(0,0,(self.width+10),60*6));
+		main_layout = GUI.vLayoutView.new(parent, Rect(0,0,(self.width+10),600));
 		main_layout.background = Color.rand;
 
 		// player line + effects(TODO) + amp
@@ -1204,8 +1238,23 @@ make_cell_button = { arg parent, label, action;
 
 		make_stepline_widget.(ps_row_layout, \stepline);
 
+		// dur
+
+		ps_row_layout = GUI.hLayoutView.new(main_layout, Rect(0,0,(self.width+10),60));
+		ps_row_layout.background = Color.rand;
+
+		make_cell_button.(ps_row_layout, \dur, {  });
+
+		make_midi_cc_widget.(ps_row_layout, \dur, (
+			source: nil,
+			channel: nil,
+			number: ~cakewalk[\slider][1],
+			name: "slider1",
+			val: nil
+		));
+
 		// others param
-		params.reject([\stepline,\amp,\type].includes(_)).do { arg param, knobidx;
+		params.reject([\stepline,\amp,\dur,\type,\out,\gate].includes(_)).do { arg param, knobidx;
 			var ccid = nil;
 
 			param.debug("parammmmm2");

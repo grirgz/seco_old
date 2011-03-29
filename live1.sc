@@ -56,17 +56,23 @@ Out.ar(0, osc); // send output to audio bus zero.
 }).store;
 
 
-SynthDef(\bass, { |gate = 1, t_trig = 1, freq, freqlag = 0.1, ffreq = 1500, rq = 0.1, filtAttack = 0,
+SynthDef(\bass, { |gate = 1, t_trig = 1, freq=100, freqlag = 0.1, ffreq = 1500, rq = 0.1, filtAttack = 0,
 		amp = 1, out = 0|
 	var	sig = Saw.ar(Lag.kr(freq, freqlag) * [1, 1.005]).sum,
 		fenv = EnvGen.kr(Env([0, filtAttack, 0], [0.01, 0.2], -3), t_trig) + 1;
 	sig = RLPF.ar(sig, ffreq * fenv, rq, amp)
 		* EnvGen.kr(Env.adsr(0.01, 0.2, 0.5, 0.08), (gate > 0) - (t_trig > 0), doneAction: 2);
 	Out.ar(out, sig ! 2);
-}, metadata: (specs: (\ffreq: \freq)) ).store;
+}, metadata: (specs: (
+	ffreq: \freq,
+	t_trig: ControlSpec(0, 1, \lin, 1, 1, "trig"),
+	freqlag: \delay,
+	filtAttack: \delay
+)) ).store;
 
 )
 
+~get_spec.(\sustain)
 
 (
 
@@ -140,7 +146,9 @@ SynthDescLib.synthDescs[\pgrain].dump;
 SynthDescLib.global.synthDescs[\pgrain].controls[0].dump;
 SynthDescLib.global.synthDescs[\pgriain].controls[0].defaultValue;
 SynthDescLib.global.synthDescs[\pgrain].controlNames
+SynthDescLib.global.synthDescs[\basiis].metadata.specs[\t_trig].asSpec
 
+\freq.map
 \plop.isSymbol
 
 ~p = EventPatternProxy.new
@@ -180,4 +188,17 @@ Pseq([1/10, 0.5, 1, 2], inf)
 
 ]).play
 
+)
+
+~f = { arg bla=4, raa=5; };
+~f.argNames
+~f.defaultArgs
+
+~a = nil;
+~a = 7;
+~b = ~a ?? 4
+
+(
+var defname = nil, argName=\sustain;
+SynthDescLib.global.synthDescs[defname].notNil and: { SynthDescLib.global.synthDescs[defname].metadata.specs[argName].notNil }
 )
