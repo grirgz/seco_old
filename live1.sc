@@ -7,18 +7,16 @@ Document.dir = "/home/ggz/code/sc/";
 
 (
 
-SynthDef(\pgrain, 
-{ arg out = 0, freq=800, sustain=0.001, amp=0.5, pan = 0;
-var window;
-window = Env.sine(sustain, amp * AmpCompA.kr(freq));
-Out.ar(out, 
-Pan2.ar(
-SinOsc.ar(freq),
-pan
-) * EnvGen.ar(window, doneAction:2)
-)
-}
-).store;
+SynthDef(\pgrain, { arg out = 0, freq=800, sustain=0.001, amp=0.5, pan = 0;
+	var window;
+	window = Env.sine(sustain, amp * AmpCompA.kr(freq));
+	Out.ar(out, 
+	Pan2.ar(
+	SinOsc.ar(freq),
+	pan
+	) * EnvGen.ar(window, doneAction:2)
+	)
+}).store;
 
 SynthDef(\noiseGrain, 
 { arg out = 0, freq=800, sustain=0.001, amp=0.5, pan = 0;
@@ -126,6 +124,8 @@ SynthDef(\bass, { |gate = 1, t_trig = 1, freq=100, freqlag = 0.1, ffreq = 1500, 
 },
 
 ];
+
+// TODO: j'ai changé les fonctions de gui pour decaler mais j'ai oublié que fallais decaler uniquement pour \parlive...
 
 ~synthlib = [
 \bass -> \bass,

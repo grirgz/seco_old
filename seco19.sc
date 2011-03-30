@@ -358,6 +358,21 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 };
 
 // ==========================================
+// PARPLAYER FACTORY
+// ==========================================
+
+~make_parplayer = { arg plist;
+	var pplayer;
+	pplayer = (
+		init: { arg self;
+			self.node.source = Ppar(plist);
+		},
+		node: EventPatternProxy.new
+	);
+
+};
+
+// ==========================================
 // SEQUENCER FACTORY
 // ==========================================
 
@@ -438,7 +453,7 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 		},
 		cc: Dictionary.new,
 		selected: (
-			coor: 0 @ 1,
+			coor: 0 @ 0,
 			panel: \parlive,
 			bank: 0,
 			kind: \node // \libnode, \node, \nodegroup
@@ -540,7 +555,7 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 				switch(sel.kind,
 					\node, {
 						self.model.set_parlive(sel, 0);
-						self.refresh_button(self.get_matrix_button(sel.coor), "void");
+						self.refresh_button(self.get_matrix_button(self.data_to_gui_coor(sel.coor)), "void");
 						self.sync_button_state(sel);
 					},
 					\nodegroup, {
@@ -593,18 +608,14 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 				var coor = input[1];
 				var oldsel = self.state.selected.deepCopy;
 
-				if( self.state.current.panel == \parlive, {
-					coor.y = coor.y + 1;
-				});
-				self.state.selected.coor = input[1];
+				self.state.selected.coor = coor;
 				self.state.selected.panel = self.state.current.panel;
 				self.state.selected.bank = self.state.current.bank;
-				self.state.selected.kind = switch( self.state.selected.panel,
-					\patlib, { \libnode },
-					\parlive, { \node }
-				);
+				self.state.selected.kind = if( coor.y < 0, { \nodegroup.debug("====selected group!!!"); },{ \node } );
+
 				//self.debug("bah quoi");
 				self.state.selected.debug("selected");
+
 				self.sync_button_state(oldsel);
 				self.sync_button_state(self.state.selected);
 			},
@@ -705,24 +716,46 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 			},
 
 			\play_selected, {
-				var player = self.get_selected_player;
-				if( player.isNil, { 
-					"Dont play void player".debug("NONO");
+				var player;
+				var group;
+				if( self.state.selected.kind == \nodegroup, {
+					group = self.model.get_pargroup(self.state.selected);
+					group.data.do { arg name;
+						if(name != 0, {
+							self.model.livenodepool[name].node.play;
+						});
+					};
 				}, {
-					
-					player.node.dump;	
-					player.node.source.dump;	
-					player.node.play;	
-					"fin play".debug;
+					player = self.get_selected_player;
+					if( player.isNil, { 
+						"Dont play void player".debug("NONO");
+					}, {
+						
+						player.node.dump;	
+						player.node.source.dump;	
+						player.node.play;	
+						"fin play".debug;
 
+					});
 				});
 			},
 			\stop_selected, {
-				var player = self.get_selected_player;
-				if( player.isNil, { 
-					"Dont stop void player".debug("NONO");
+				var player;
+				var group;
+				if( self.state.selected.kind == \nodegroup, {
+					group = self.model.get_pargroup(self.state.selected);
+					group.data.do { arg name;
+						if(name != 0, {
+							self.model.livenodepool[name].node.stop;
+						});
+					};
 				}, {
-					player.node.stop;
+					player = self.get_selected_player;
+					if( player.isNil, { 
+						"Dont stop void player".debug("NONO");
+					}, {
+						player.node.stop;
+					});
 				});
 			}
 		)
@@ -781,8 +814,14 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 
 		~kbpad8x4.do { arg line, iy;
 			line.do { arg key, ix;
+				// data_coor
 				self.kb_handler[[0, key]] = { self.handlers( [\select, ix @ iy] ) };
 			}
+		};
+
+		~kbpad8x4[0].do { arg key, ix;
+			// data_coor
+			self.kb_handler[[~modifiers.alt, key]] = { self.handlers( [\select, ix @ (-1)] ) };
 		};
 
 		~kbnumpad.do { arg keycode, idx;
@@ -817,6 +856,14 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 	width: 1310,
 	height: 500,
 
+	data_to_gui_coor: { arg self, data_coor;
+		data_coor.x @ (data_coor.y + 1);
+	},
+
+	gui_to_data_coor: { arg self, data_coor;
+		data_coor.x @ (data_coor.y - 1);
+	},
+
 	make_cell_button: { arg self, parent, label, action;
 		var bt;
 
@@ -841,8 +888,8 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 		];
 	},
 
-	refresh_button_at: { arg self, address, label;
-		self.refresh_button(self.get_matrix_button(address.coor), label);
+	refresh_button_at: { arg self, data_address, label;
+		self.refresh_button(self.get_matrix_button(self.data_to_gui_coor(data_address.coor)), label);
 	},
 
 	player_states: (
@@ -851,8 +898,8 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 		\clipboard: [\copy, \cut]
 	),
 
-	get_matrix_button: { arg self, point;
-		self.window.view.children[point.x].children[point.y]
+	get_matrix_button: { arg self, gui_point;
+		self.window.view.children[gui_point.x].children[gui_point.y]
 	},
 
 	get_selected_name: { arg self;
@@ -933,17 +980,23 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 		});
 	},
 
-	sync_button_state: { arg self, address;
-		var state = self.get_player_state(address);
+	sync_button_state: { arg self, data_address;
+		var state;
+		var gui_coor;
+		"BEGIN".debug("sync_button_state");
+		state = self.get_player_state(data_address);
+		data_address.debug("sync_button_state data_address");
+		gui_coor = self.data_to_gui_coor(data_address.coor);
 		// strange bug, must use intermediate var state else error occur
 		//address.debug("set_button_state address");
 		//state.debug("set_button_state state");
-		self.set_button_state(self.get_matrix_button(address.coor), state)
+		gui_coor.debug("sync_button_state gui_coor");
+		self.set_button_state(self.get_matrix_button(gui_coor), state)
 	},
 
 	make_parlive_view: { arg self; 
 	
-		var ps_col_layout, curbank, address;
+		var ps_col_layout, curbank, data_address;
 		var parent = self.window;
 		curbank = self.state.current.bank;
 
@@ -953,27 +1006,27 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 			ps_col_layout = GUI.vLayoutView.new(parent, Rect(0,0,(self.width+10)/9,60*8));
 			ps_col_layout.background = Color.rand;
 
-			label = self.model.get_pargroup((bank: curbank, coor: rx @ 0))[\name];
+			label = self.model.get_pargroup((bank: curbank, coor: rx @ (-1)))[\name];
 
 			self.make_cell_button(ps_col_layout, label, {  });
-			address = (
-				coor: rx @ 0,
+			data_address = (
+				coor: rx @ (-1),
 				bank: curbank,
 				panel: \parlive
 			);
-			self.sync_button_state(address);
+			self.sync_button_state(data_address);
 
 			8.do { arg ry;
 
 				//ry.debug("maih QUOIIIII");
 				label = self.model.get_parlive((coor: rx @ ry, bank: curbank));
 				self.make_cell_button(ps_col_layout, label, {  });
-				address = (
-					coor: rx @ (ry+1),
+				data_address = (
+					coor: rx @ ry,
 					bank: curbank,
 					panel: \parlive
 				);
-				self.sync_button_state(address);
+				self.sync_button_state(data_address);
 			};
 
 		};
@@ -986,6 +1039,7 @@ Spec.add(\legato, ControlSpec(0, 1.2, \lin, 0, 0.707));
 		var ps_col_layout, curbank, address;
 		var parent = self.window;
 		curbank = self.state.current.bank;
+		"BEGIN".debug("make_patlib_view");
 
 		self.model.patlib[curbank].do { arg col, rx;
 			ps_col_layout = GUI.vLayoutView.new(parent, Rect(0,0,(self.width+10)/9,60*6));
